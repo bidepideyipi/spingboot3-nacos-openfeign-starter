@@ -4,6 +4,22 @@ server:
 spring:
   application:
     name: service-b
+  cloud:
+    sentinel:
+      transport:
+        dashboard: localhost:8859
+        port: 8719
+      eager: true
+
+# HttpClient配置
+http:
+  client:
+    connect-timeout: 5000
+    socket-timeout: 10000
+    max-total: 200
+    default-max-per-route: 50
+    time-to-live: 60
+    enable-pool: true
 
 management:
   endpoints:
@@ -22,3 +38,8 @@ feign:
         readTimeout: 10000
   circuitbreaker:
     enabled: false
+
+logging:
+  level:
+    com.example.serviceb.httpclient: DEBUG
+    com.alibaba.csp.sentinel: INFO

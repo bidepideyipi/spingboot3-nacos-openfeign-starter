@@ -1,5 +1,6 @@
 com/example/servicea/service/UserService.class
 com/example/servicea/ServiceAApplication.class
+com/example/servicea/controller/SlowController.class
 com/example/servicea/controller/UserController.class
 com/example/servicea/UserDto.class
 com/example/servicea/controller/WelcomeController.class
