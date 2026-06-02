@@ -1,0 +1,6 @@
+/Users/anthony/Documents/github/microservices-demo/service-b/src/main/java/com/example/serviceb/controller/AggregationController.java
+/Users/anthony/Documents/github/microservices-demo/service-b/src/main/java/com/example/serviceb/service/UserAggregationService.java
+/Users/anthony/Documents/github/microservices-demo/service-b/src/main/java/com/example/serviceb/ServiceBApplication.java
+/Users/anthony/Documents/github/microservices-demo/service-b/src/main/java/com/example/serviceb/feign/ServiceAClient.java
+/Users/anthony/Documents/github/microservices-demo/service-b/src/main/java/com/example/serviceb/config/FeignConfig.java
+/Users/anthony/Documents/github/microservices-demo/service-b/src/main/java/com/example/serviceb/UserDto.java
