@@ -49,7 +49,12 @@ microservices-demo/
 ### 1. 启动 Nacos
 
 ```bash
-docker run -d --name nacos -e MODE=standalone -p 8848:8848 nacos/nacos-server:v2.3.0
+docker run -d --name nacos \
+    -p 8848:8848 \
+    -p 9848:9848 \
+    -p 9849:9849 \
+    -e MODE=standalone \
+    nacos/nacos-server:v2.4.3
 ```
 
 访问: http://localhost:8848/nacos (用户名/密码: nacos/nacos)
