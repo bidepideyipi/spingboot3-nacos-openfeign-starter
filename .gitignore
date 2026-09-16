@@ -1,2 +1,118 @@
-service-a/target/*
-service-b/target/*
+# ============================================================
+# Java / Spring Boot / Maven best-practice .gitignore
+# ============================================================
+
+# ----- Build output -----
+target/
+build/
+bin/
+out/
+!.mvn/wrapper/maven-wrapper.jar
+
+# ----- Maven (mvnw) -----
+.mvn/timing.properties
+.mvn/wrapper/maven-wrapper.properties
+
+# ----- Gradle (in case of future migration) -----
+.gradle/
+gradle-app.setting
+!gradle-wrapper.jar
+
+# ----- IDE: IntelliJ IDEA -----
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# ----- IDE: Eclipse / STS -----
+.classpath
+.project
+.settings/
+.factorypath
+.apt_generated/
+.springBeans
+.sts4-cache/
+
+# ----- IDE: VS Code -----
+.vscode/
+*.code-workspace
+.history/
+
+# ----- IDE: NetBeans -----
+nbproject/private/
+nbbuild/
+dist/
+nbdist/
+.nb-gradle/
+
+# ----- Compiled class files -----
+*.class
+
+# ----- Package files -----
+*.jar
+*.war
+*.ear
+*.nar
+*.zip
+*.tar.gz
+*.rar
+
+# Keep the Maven wrapper jar
+!.mvn/wrapper/maven-wrapper.jar
+# Keep source jars if needed (uncomment to allow)
+# !*-sources.jar
+
+# ----- Logs -----
+*.log
+logs/
+log/
+
+# ----- OS generated files -----
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# ----- Spring Boot -----
+*.original
+spring-shell.log
+HELP.md
+
+# ----- Nacos -----
+nacos/
+
+# ----- Properties / secrets -----
+application-local.yml
+application-local.properties
+application-*-local.yml
+application-*-local.properties
+*.local.yml
+*.local.properties
+*.p12
+*.jks
+*.keystore
+*.truststore
+
+# ----- Node / Frontend (if added later) -----
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ----- Coverage / test reports -----
+coverage/
+.jacoco/
+*.exec
+hs_err_pid*
+replay_pid*
+
+# ----- Misc -----
+*.hprof
+*.swp
+*.swo
+*~

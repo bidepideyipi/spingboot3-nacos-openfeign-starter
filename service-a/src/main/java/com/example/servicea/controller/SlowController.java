@@ -3,6 +3,7 @@ package com.example.servicea.controller;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.concurrent.atomic.AtomicInteger;
@@ -38,6 +39,25 @@ public class SlowController {
         }
 
         return String.format("第 %d 次请求完成 (延迟 %dms)", count, delayMs);
+    }
+
+    /**
+     * 固定延迟慢响应接口 - 用于线程池隔离验证
+     * 所有请求延迟相同时间,便于并发打满隔离线程池
+     *
+     * @param ms 延迟毫秒数,默认 5000
+     * @return 响应信息
+     */
+    @GetMapping("/fixed")
+    public String fixedSlow(@RequestParam(defaultValue = "5000") int ms) {
+        log.info("固定延迟请求,延迟 {}ms", ms);
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("睡眠被中断", e);
+        }
+        return String.format("固定延迟完成 (延迟 %dms)", ms);
     }
 
     /**
