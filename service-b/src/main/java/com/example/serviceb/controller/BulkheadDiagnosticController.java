@@ -1,4 +1,4 @@
-package com.example.serviceb.httpclient;
+package com.example.serviceb.controller;
 
 import io.github.resilience4j.bulkhead.ThreadPoolBulkhead;
 import io.github.resilience4j.bulkhead.ThreadPoolBulkheadConfig;

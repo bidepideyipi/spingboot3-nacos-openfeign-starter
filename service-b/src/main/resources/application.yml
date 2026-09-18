@@ -61,21 +61,24 @@ resilience4j:
         queue-capacity: 20
         # 空闲线程存活时长(仅对超出 core 的线程生效)
         keep-alive-duration: 1m
-    #instances:
+    instances:
       # SDK 的 ServiceACaller (Feign 调用 service-a) 使用的隔离舱
-    #  service-a:
-    #    base-config: default
+      service-a:
+        base-config: default
+      # HttpClient 直连 service-a(绕过 Feign)使用的隔离舱 —— 与 service-a 独立,互不影响
+      service-a-http:
+        base-config: default
       # HttpClientTemplate 调用外部用户 API 使用的隔离舱
-    #  externalUserApi:
-    #    base-config: default
+      externalUserApi:
+        base-config: default
       # 慢调用演示接口使用的隔离舱
-    #  slowApi:
-    #    base-config: default
+      slowApi:
+        base-config: default
       # 重置计数器接口使用的隔离舱
-    #  resetCounter:
-    #    base-config: default
+      resetCounter:
+        base-config: default
 
 logging:
   level:
-    #com.example.serviceb.httpclient: DEBUG
+    #com.example.communisdk.http: DEBUG
     io.github.resilience4j: DEBUG

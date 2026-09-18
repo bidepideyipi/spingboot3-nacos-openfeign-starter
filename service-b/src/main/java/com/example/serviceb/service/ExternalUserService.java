@@ -1,6 +1,8 @@
-package com.example.serviceb.httpclient;
+package com.example.serviceb.service;
 
 import com.example.serviceb.UserDto;
+import com.example.communisdk.http.HttpClientTemplate;
+import com.example.communisdk.http.HttpResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;

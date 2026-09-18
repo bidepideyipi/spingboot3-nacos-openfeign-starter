@@ -1,5 +1,7 @@
-package com.example.serviceb.httpclient;
+package com.example.serviceb.controller;
 
+import com.example.serviceb.service.ExternalUserService;
+import com.example.communisdk.http.HttpResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 

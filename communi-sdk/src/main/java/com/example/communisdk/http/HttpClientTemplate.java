@@ -1,9 +1,8 @@
-package com.example.serviceb.httpclient;
+package com.example.communisdk.http;
 
+import com.example.communisdk.client.BulkheadExecutor;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.resilience4j.bulkhead.BulkheadFullException;
-import io.github.resilience4j.bulkhead.ThreadPoolBulkhead;
-import io.github.resilience4j.bulkhead.ThreadPoolBulkheadRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.http.client.methods.CloseableHttpResponse;
@@ -13,7 +12,6 @@ import org.apache.http.client.methods.HttpRequestBase;
 import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.util.EntityUtils;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -25,16 +23,21 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 /**
- * HTTP 请求模板，仅集成 Resilience4j 线程池隔离 (ThreadPoolBulkhead)。
+ * HTTP 请求模板，集成 Resilience4j 线程池隔离 (ThreadPoolBulkhead)。
  *
- * <p>下游调用在独立的 {@link ThreadPoolBulkhead} 线程池中执行:
+ * <p>下游调用在独立的 {@link io.github.resilience4j.bulkhead.ThreadPoolBulkhead} 线程池中执行:
  * <ul>
  *   <li>下游变慢时,只有隔离池中的线程在等待,本服务请求线程不会堆积;</li>
  *   <li>线程池满且队列满时立即抛 {@link BulkheadFullException},不阻塞调用线程;</li>
  *   <li>本项目不使用熔断器,仅靠线程池隔离感知下游压力。</li>
  * </ul>
- * 每个 resourceName 对应 application.yml 中 resilience4j.thread-pool-bulkhead.instances
- * 下同名的实例。
+ *
+ * <p><b>隔离提交逻辑</b>(开关判断 + 提交到隔离池)复用 {@link BulkheadExecutor},
+ * 与 Feign 路径的 {@code ServiceACaller} 共享同一份隔离代码。
+ * 本类只保留 HTTP 专属逻辑:拼请求、执行、解析、超时/异常/blocked 兜底。
+ *
+ * 每个 resourceName 对应消费方 application.yml 中
+ * {@code resilience4j.thread-pool-bulkhead.instances.<name>} 下同名的实例。
  */
 @Slf4j
 @Component
@@ -46,23 +49,12 @@ public class HttpClientTemplate {
 
     private final CloseableHttpClient httpClient;
     private final ObjectMapper objectMapper;
-    private final ThreadPoolBulkheadRegistry threadPoolBulkheadRegistry;
+    private final BulkheadExecutor bulkheadExecutor;
 
     /**
-     * 线程池隔离开关。
-     * <ul>
-     *   <li>{@code true}(默认): 走隔离线程池,池+队列满时立即拒绝(BulkheadFullException)。</li>
-     *   <li>{@code false}: 调用线程直通,在当前线程同步执行下游调用,不隔离、不拒绝。</li>
-     * </ul>
-     * 由 {@code resilience4j.thread-pool-bulkhead.enabled} 控制。
-     */
-    @Value("${resilience4j.thread-pool-bulkhead.enabled:true}")
-    private boolean bulkheadEnabled;
-
-    /**
-     * GET请求
+     * GET 请求
      *
-     * @param url          请求URL
+     * @param url          请求 URL
      * @param resourceName Resilience4j 资源名称(对应 thread-pool-bulkhead 实例名)
      * @param responseType 返回类型
      * @return 响应结果
@@ -73,7 +65,7 @@ public class HttpClientTemplate {
     }
 
     /**
-     * GET请求(带请求头)
+     * GET 请求(带请求头)
      */
     public <T> HttpResponse<T> get(String url, Map<String, String> headers, String resourceName, Class<T> responseType) {
         HttpGet httpGet = new HttpGet(url);
@@ -82,7 +74,7 @@ public class HttpClientTemplate {
     }
 
     /**
-     * POST请求(JSON)
+     * POST 请求(JSON)
      */
     public <T> HttpResponse<T> postJson(String url, Object body, String resourceName, Class<T> responseType) {
         try {
@@ -98,7 +90,7 @@ public class HttpClientTemplate {
     }
 
     /**
-     * POST请求(带请求头)
+     * POST 请求(带请求头)
      */
     public <T> HttpResponse<T> postJson(String url, Object body, Map<String, String> headers,
                                          String resourceName, Class<T> responseType) {
@@ -116,33 +108,24 @@ public class HttpClientTemplate {
     }
 
     /**
-     * 执行请求(线程池隔离)
+     * 执行请求(线程池隔离)。
      *
-     * <p>调用链: 调用线程 -> 提交到隔离线程池 -> 实际HTTP请求
-     * <p>隔离池满且队列满时 {@link BulkheadFullException} 立即返回限流响应。
+     * <p>隔离提交(开关 + 提交到隔离池)委托 {@link BulkheadExecutor};本方法负责 HTTP 专属的
+     * 超时、异常、blocked 兜底。
+     * <ul>
+     *   <li>启用隔离且池+队列满: {@link BulkheadExecutor#submit} 同步抛 {@link BulkheadFullException}
+     *       → 返回 blocked;</li>
+     *   <li>关闭隔离: BulkheadExecutor 在调用线程同步执行,异常由 catch(Exception) 兜底;</li>
+     *   <li>启用隔离且任务异步抛错: future.get() 抛 ExecutionException → 返回 error。</li>
+     * </ul>
      */
     private <T> HttpResponse<T> execute(HttpRequestBase request, String resourceName, Class<T> responseType) {
         long startTime = System.currentTimeMillis();
-
-        // 隔离开关关闭:调用线程直通,不走隔离池
-        if (!bulkheadEnabled) {
-            try {
-                return doRequest(request, responseType, startTime);
-            } catch (RuntimeException e) {
-                log.error("请求执行异常(线程池隔离已关闭): url={}", request.getURI(), e);
-                return HttpResponse.error("请求异常: " + e.getMessage());
-            }
-        }
-
-        ThreadPoolBulkhead bulkhead = threadPoolBulkheadRegistry.bulkhead(resourceName);
-
         try {
-            // 实际调用在隔离线程池中执行(executeSupplier 池+队列满时同步抛 BulkheadFullException)
-            CompletableFuture<HttpResponse<T>> future = bulkhead.executeSupplier(() ->
-                    doRequest(request, responseType, startTime)
-            ).toCompletableFuture();
-
-            // 调用线程等待结果(有超时兜底,实际等待时长受 HTTP socket-timeout 约束)
+            CompletableFuture<HttpResponse<T>> future = bulkheadExecutor.submit(
+                    resourceName,
+                    () -> doRequest(request, responseType, startTime)
+            );
             return future.get(CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         } catch (BulkheadFullException e) {
             long rt = System.currentTimeMillis() - startTime;
@@ -158,6 +141,7 @@ public class HttpClientTemplate {
             log.error("请求执行异常: url={}, rt={}ms", request.getURI(), rt, cause);
             return HttpResponse.error("请求异常: " + cause.getMessage());
         } catch (Exception e) {
+            // 覆盖:隔离关闭时 BulkheadExecutor 同步执行任务抛出的异常,及其它未预期异常
             long rt = System.currentTimeMillis() - startTime;
             log.error("未知异常: url={}, rt={}ms", request.getURI(), rt, e);
             return HttpResponse.error("未知异常: " + e.getMessage());
@@ -165,7 +149,7 @@ public class HttpClientTemplate {
     }
 
     /**
-     * 实际执行 HTTP 请求并解析响应(在隔离线程池中运行)。
+     * 实际执行 HTTP 请求并解析响应(在隔离线程池中运行,或隔离关闭时在调用线程运行)。
      */
     private <T> HttpResponse<T> doRequest(HttpRequestBase request, Class<T> responseType, long startTime) {
         try (CloseableHttpResponse response = httpClient.execute(request)) {
