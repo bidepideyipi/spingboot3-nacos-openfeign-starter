@@ -54,4 +54,16 @@ public class ServiceACaller {
         return bulkheadExecutor.submit(RESOURCE, feignCall);
     }
 
+    /**
+     * 查询 service-a 隔离舱的剩余可接纳容量(可用线程数 + 剩余队列容量)。
+     *
+     * <p>供消费方做背压预判:为 0 时不提交任务(如 MQ 消费者据此跳过 poll),
+     * 把"池满"信号直接转化为"不再拉取",背压从隔离舱传到消费者再传回 broker。
+     *
+     * @return 剩余容量;隔离关闭时返回 {@link Integer#MAX_VALUE}
+     */
+    public int getRemainingCapacity() {
+        return bulkheadExecutor.getRemainingCapacity(RESOURCE);
+    }
+
 }

@@ -1,20 +1,18 @@
 package com.example.serviceb.service;
 
 import com.example.communisdk.client.ServiceACaller;
-import com.example.serviceb.UserDto;
 import com.example.serviceb.client.ServiceAClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 用户聚合服务:通过 communi-sdk 的 {@link ServiceACaller} 调用 service-a。
+ * service-a 聚合服务:通过 communi-sdk 的 {@link ServiceACaller} 调用 service-a(Feign 路径)。
  *
  * <p>所有对 service-a 的调用都经 {@link ServiceACaller#execute} 包装,
- * 自动获得"熔断 + 线程池隔离"保护(注解在 SDK 的 ServiceACaller 类级别只写一次)。
+ * 自动获得线程池隔离保护(隔离舱 {@code "service-a"},注解在 SDK 的 ServiceACaller 类级别只写一次)。
  * service-a 接口增删改时,只需修改 {@link ServiceAClient},无需改 SDK。
  */
 @Slf4j
@@ -30,8 +28,7 @@ public class UserAggregationService {
 
     public String getWelcomeFromA() {
         log.info("调用 Service A 的 welcome 接口");
-        String result = call(() -> serviceAClient.getWelcome());
-        return "Service B 调用结果: " + result;
+        return call(() -> serviceAClient.getWelcome());
     }
 
     public String getHealthFromA() {
@@ -39,32 +36,18 @@ public class UserAggregationService {
         return call(() -> serviceAClient.getHealth());
     }
 
-    public List<UserDto> getAllUsers() {
-        log.info("从 Service A 获取所有用户");
-        return call(() -> serviceAClient.getAllUsers());
+    /**
+     * 调用 service-a 的固定延迟慢响应接口 - 用于线程池隔离验证(Feign 路径)。
+     * 并发调用此接口,可观察 service-a 隔离舱打满后的拒绝行为。
+     *
+     * @param ms 下游延迟毫秒数
+     */
+    public String callFixedSlowApi(int ms) {
+        log.info("Feign 调用 service-a 固定延迟: delay={}ms", ms);
+        return call(() -> serviceAClient.getSlowFixed(ms));
     }
 
-    public UserDto getUserById(Long id) {
-        log.info("从 Service A 获取用户: id={}", id);
-        return call(() -> serviceAClient.getUserById(id));
-    }
-
-    public UserDto createUser(UserDto user) {
-        log.info("通过 Service A 创建用户: {}", user);
-        return call(() -> serviceAClient.createUser(user));
-    }
-
-    public UserDto updateUser(Long id, UserDto user) {
-        log.info("通过 Service A 更新用户: id={}, user={}", id, user);
-        return call(() -> serviceAClient.updateUser(id, user));
-    }
-
-    public String getUserSummary() {
-        List<UserDto> users = call(() -> serviceAClient.getAllUsers());
-        return String.format("Service A 当前共有 %d 个用户", users.size());
-    }
-
-    // ---------- 私有工具:统一走 SDK 的熔断 + 线程池隔离 ----------
+    // ---------- 私有工具:统一走 SDK 的线程池隔离 ----------
 
     private <T> T call(java.util.function.Supplier<T> feignCall) {
         try {

@@ -2,9 +2,9 @@
 # =============================================================================
 # HttpClient 直连路径 (service-a-http 隔离舱) 线程池隔离验证脚本
 #
-# 与 verify-bulkhead.sh 的区别:
-#   verify-bulkhead.sh      → /api/external/slow/fixed → 隔离舱 slowApi/externalUserApi
-#   verify-bulkhead-http.sh → /api/service-a-direct/slow/fixed → 隔离舱 service-a-http
+# 与 verify-bulkhead-feign.sh 的区别:
+#   verify-bulkhead-feign.sh → /api/slow/fixed              → 隔离舱 service-a     (Feign 路径)
+#   verify-bulkhead-http.sh → /api/service-a-direct/slow/fixed → 隔离舱 service-a-http (HttpClient 直连)
 #
 # 验证目标配置 (service-b/src/main/resources/application.yml):
 #   max-thread-pool-size:  10
@@ -148,7 +148,7 @@ echo "$METRICS" | python3 -m json.tool 2>/dev/null || echo "$METRICS"
 echo
 echo "重点观察:"
 echo "  - service-a-http: threadPoolSize=10, queueDepth=0, activeThreadCount=0 (本路径已空闲)"
-echo "  - service-a / externalUserApi / slowApi / resetCounter: 各项指标应未受影响(独立线程池,互不干扰)"
+echo "  - service-a (Feign 路径隔离舱): 各项指标应未受影响(独立线程池,互不干扰)"
 
 echo
 c_ok "验证完成。"

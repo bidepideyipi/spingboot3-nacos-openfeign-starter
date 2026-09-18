@@ -1,6 +1,5 @@
 package com.example.serviceb.service;
 
-import com.example.serviceb.UserDto;
 import com.example.communisdk.http.HttpClientTemplate;
 import com.example.communisdk.http.HttpResponse;
 import lombok.RequiredArgsConstructor;
@@ -37,18 +36,6 @@ public class ServiceADirectService {
     public HttpResponse<String> getWelcomeDirect() {
         log.info("HttpClient 直连 service-a: /api/welcome");
         return httpClientTemplate.get(SERVICE_A_URL + "/api/welcome", RESOURCE, String.class);
-    }
-
-    /** 直连 service-a 的 /api/users */
-    public HttpResponse<UserDto[]> getUsersDirect() {
-        log.info("HttpClient 直连 service-a: /api/users");
-        return httpClientTemplate.get(SERVICE_A_URL + "/api/users", RESOURCE, UserDto[].class);
-    }
-
-    /** 直连 service-a 的 /api/users/{id} */
-    public HttpResponse<UserDto> getUserByIdDirect(Long id) {
-        log.info("HttpClient 直连 service-a: /api/users/{}", id);
-        return httpClientTemplate.get(SERVICE_A_URL + "/api/users/" + id, RESOURCE, UserDto.class);
     }
 
     /**

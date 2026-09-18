@@ -196,6 +196,135 @@ service-a 既被 Feign 调（`ServiceACaller` → `service-a` 池），也被 Ht
 
 ---
 
+## B.5 `RemainingCapacity` 详解与背压预判（MQ 消费场景）
+
+> 配置位置：`application.yml` → `resilience4j.thread-pool-bulkhead.configs.default`
+> 代码引用：`BulkheadExecutor.getRemainingCapacity()`、`ServiceAPullConsumer.consumeLoop()` 中的背压预判
+
+### B.5.1 `RemainingCapacity` 的定义
+
+`BulkheadExecutor.getRemainingCapacity(resource)` 返回的是 **可用线程数 + 剩余队列容量** 的总和，不是 `queue-capacity` 本身：
+
+```java
+public int getRemainingCapacity(String resource) {
+    if (!enabled) {
+        return Integer.MAX_VALUE;          // 关闭隔离 = 无容量限制
+    }
+    ThreadPoolBulkhead bulkhead = threadPoolBulkheadRegistry.bulkhead(resource);
+    ThreadPoolBulkhead.Metrics m = bulkhead.getMetrics();
+    return m.getAvailableThreadCount() + m.getRemainingQueueCapacity();
+}
+```
+
+公式：
+
+```
+RemainingCapacity = availableThreadCount + remainingQueueCapacity
+                  = (max-thread-pool-size - 活跃线程数) + (queue-capacity - 排队任务数)
+                  = (max-thread-pool-size + queue-capacity) - 在途任务数
+                  = 总容量 - 在途任务数
+```
+
+### B.5.2 当前配置下的容量分解
+
+```yaml
+resilience4j:
+  thread-pool-bulkhead:
+    configs:
+      default:
+        max-thread-pool-size: 10   # 隔离池线程数
+        queue-capacity: 20         # 池满后排队容量
+```
+
+**总容量 = 10 + 20 = 30**
+
+```
+总容量 30 = 隔离池线程(10) + 等待队列(20)
+
+┌─────────────────────────────────────────┐
+│ 隔离池 (max-thread-pool-size=10)          │ ← 实际执行下游调用的线程
+│ ▓▓▓▓▓▓▓▓░░                              │ ← 8 个在跑,2 个空闲
+├─────────────────────────────────────────┤
+│ 等待队列 (queue-capacity=20)              │ ← 池满后任务在这里排队
+│ ░░░░░░░░░░░░░░░░░░░░                     │ ← 0 个在排队,20 个空位
+└─────────────────────────────────────────┘
+
+RemainingCapacity = 空闲线程(2) + 空位队列(20) = 22
+```
+
+### B.5.3 日志对照表
+
+| 日志 | 在途任务数 | 计算 | 含义 |
+|---|---|---|---|
+| `RemainingCapacity=30` | 0 | 30 - 0 | 空闲，可全速提交 |
+| `RemainingCapacity=22` | 8 | 30 - 8 | 8 个实例在调 service-a（2 秒延迟中） |
+| `RemainingCapacity=21` | 9 | 30 - 9 | 9 个实例在调 service-a |
+| `RemainingCapacity=10` | 20 | 30 - 20 | 池满 + 队列排了一半，开始警戒 |
+| `RemainingCapacity=0`  | 30 | 30 - 30 | 池+队列全满，再提交必被拒 |
+
+### B.5.4 为什么这么设计
+
+`RemainingCapacity` 的语义是"**还能再提交多少任务而不被拒绝**"：
+- 提交的任务先尝试占用空闲线程（前 10 个）
+- 池满后任务进队列等待（接下来 20 个）
+- 队列也满 → 第 31 个任务直接抛 `BulkheadFullException`
+
+所以消费端用它做背压预判：`RemainingCapacity > 0` 就可以提交，`= 0` 就别 poll 了（提交了也会被拒）。
+
+### B.5.5 消费端的背压预判逻辑
+
+`ServiceAPullConsumer.consumeLoop()` 在 `poll` 之前先查 `RemainingCapacity`，根据阈值决定是否拉消息：
+
+```java
+int rc = serviceACaller.getRemainingCapacity();
+if (rc <= 10) {        // ← 阈值是 10,不是 0
+    sleepQuietly(capacityCheckIntervalMs);
+    continue;          // 不 poll,等容量恢复
+}
+log.info("[实例{}] RemainingCapacity={}", idx, rc);
+List<MessageExt> msgs = c.poll(pullTimeoutMs);
+...
+```
+
+### B.5.6 阈值取值对比
+
+| 阈值 | 含义 | 背压触发时机 | 适用场景 |
+|---|---|---|---|
+| `<= 0` | 池+队列都满才背压 | 用满线程池 + 队列才开始 | 最大化吞吐，背压最晚 |
+| `<= 10`（当前） | 队列开始被使用就背压 | 池满后队列一被用就停 poll | 平衡吞吐与保护，背压较早 |
+| `<= 20` | 池满就背压 | 隔离池一满就停 poll | 强保护，不让任务排队 |
+| `<= 30` | 几乎不消费 | 一有任务在途就停 | 极端保守，几乎不并发 |
+
+> 当前 `<= 10` 的语义：**保留 10 个线程容量给在途任务收尾**，比 `<= 0` 更激进，让背压更早触发，避免堆积在队列里等待。
+
+### B.5.7 验证背压的完整链路
+
+当 service-a 变慢时，按顺序观察：
+
+1. **`RemainingCapacity` 持续下降**：30 → 22 → 15 → 10 → 5 → 0
+2. **到阈值（10）后**：消费端停止 poll，日志只剩 `RemainingCapacity=10` 反复刷
+3. **若继续恶化到 0**：新 poll 的消息提交 bulkhead 会抛 `BulkheadFullException`
+4. **触发 seek 回退重投**：日志出现 `[实例X] 消息处理失败,seek 回退重投`
+5. **所有实例都在等**：不再 poll → broker 端 `Diff Total` 开始堆积
+
+这才是背压从隔离舱传到 broker 的完整链路：
+
+```
+service-a 慢
+   ↓
+bulkhead 线程池占满 + 队列排满
+   ↓
+RemainingCapacity 降到阈值
+   ↓
+消费端停止 poll(背压预判)
+   ↓
+broker 端消息堆积(Diff Total 上升)
+   ↓
+service-a 恢复 → 线程释放 → RemainingCapacity 回升 → 消费端恢复 poll → 堆积下降
+```
+
+---
+
 # 两套方案对比与选型
 
 | 维度 | 方案 A 慢调用熔断 | 方案 B 线程池隔离 |

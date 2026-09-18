@@ -5,6 +5,16 @@ spring:
   application:
     name: service-b
 
+# RocketMQ 配置(pull 模式消费 → Feign 调 service-a → 成功后 ack)
+rocketmq:
+  name-server: 127.0.0.1:9876
+  consumer:
+    group: service-b-pull-consumer
+    topic: service-a-topic
+    threads: 10              # 消费线程数(= 消费者实例数)。有效并发 = min(threads, topic 队列数,默认4)
+    pull-timeout-ms: 3000      # 一次 poll 最长阻塞等待时间
+    capacity-check-interval-ms: 500  # 容量预判为0时的重查间隔(防 busy-spin)
+
 # HttpClient配置
 http:
   client:
@@ -58,7 +68,7 @@ resilience4j:
         # 核心线程数(常驻)
         core-thread-pool-size: 10
         # 等待队列容量: 线程池满后,多余请求在此排队;队列也满时才立即拒绝
-        queue-capacity: 20
+        queue-capacity: 5
         # 空闲线程存活时长(仅对超出 core 的线程生效)
         keep-alive-duration: 1m
     instances:
@@ -67,15 +77,6 @@ resilience4j:
         base-config: default
       # HttpClient 直连 service-a(绕过 Feign)使用的隔离舱 —— 与 service-a 独立,互不影响
       service-a-http:
-        base-config: default
-      # HttpClientTemplate 调用外部用户 API 使用的隔离舱
-      externalUserApi:
-        base-config: default
-      # 慢调用演示接口使用的隔离舱
-      slowApi:
-        base-config: default
-      # 重置计数器接口使用的隔离舱
-      resetCounter:
         base-config: default
 
 logging:

@@ -1,12 +1,9 @@
 package com.example.serviceb.controller;
 
-import com.example.serviceb.UserDto;
 import com.example.serviceb.service.UserAggregationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.List;
 
 @Slf4j
 @RestController
@@ -28,33 +25,14 @@ public class AggregationController {
         return "Service B is running! " + userAggregationService.getHealthFromA();
     }
 
-    @GetMapping("/users/summary")
-    public String getUserSummary() {
-        return userAggregationService.getUserSummary();
+    /**
+     * 固定延迟慢调用(Feign 路径) - 用于线程池隔离验证。
+     * 并发调用此接口,可观察 service-a 隔离舱打满后的拒绝行为。
+     *
+     * @param ms 下游延迟毫秒数,默认 2000
+     */
+    @GetMapping("/slow/fixed")
+    public String slowFixed(@RequestParam(defaultValue = "2000") int ms) {
+        return userAggregationService.callFixedSlowApi(ms);
     }
-
-    @GetMapping("/users")
-    public List<UserDto> getAllUsers() {
-        log.info("获取所有用户（通过 Service A）");
-        return userAggregationService.getAllUsers();
-    }
-
-    @GetMapping("/users/{id}")
-    public UserDto getUserById(@PathVariable Long id) {
-        log.info("获取用户: id={}", id);
-        return userAggregationService.getUserById(id);
-    }
-
-    @PostMapping("/users")
-    public UserDto createUser(@RequestBody UserDto user) {
-        log.info("创建用户: {}", user);
-        return userAggregationService.createUser(user);
-    }
-
-    @PutMapping("/users/{id}")
-    public UserDto updateUser(@PathVariable Long id, @RequestBody UserDto user) {
-        log.info("更新用户: id={}, user={}", id, user);
-        return userAggregationService.updateUser(id, user);
-    }
-
 }

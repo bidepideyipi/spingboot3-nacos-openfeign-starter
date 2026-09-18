@@ -55,4 +55,23 @@ public class BulkheadExecutor {
         ThreadPoolBulkhead bulkhead = threadPoolBulkheadRegistry.bulkhead(resource);
         return bulkhead.executeSupplier(task).toCompletableFuture();
     }
+
+    /**
+     * 查询指定资源名隔离舱的"剩余可接纳容量"。
+     *
+     * <p>剩余容量 = 可用线程数({@code availableThreadCount}) + 剩余队列容量({@code remainingQueueCapacity})。
+     * 调用方可在提交前用它做背压预判:为 0 时不提交(如 MQ 消费者据此跳过 poll),
+     * 避免提交后立即被拒绝(BulkheadFullException)再回退重投的无效往返。
+     *
+     * @param resource 隔离舱资源名
+     * @return 剩余容量;enabled=false 时返回 {@link Integer#MAX_VALUE}(不隔离=无容量限制)
+     */
+    public int getRemainingCapacity(String resource) {
+        if (!enabled) {
+            return Integer.MAX_VALUE;
+        }
+        ThreadPoolBulkhead bulkhead = threadPoolBulkheadRegistry.bulkhead(resource);
+        ThreadPoolBulkhead.Metrics m = bulkhead.getMetrics();
+        return m.getAvailableThreadCount() + m.getRemainingQueueCapacity();
+    }
 }

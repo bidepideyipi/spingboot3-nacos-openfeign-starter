@@ -101,32 +101,6 @@ curl http://localhost:8082/api/welcome
 # 返回: Service B 调用结果: 欢迎来到 Service A - 用户服务
 ```
 
-### 3. 用户操作
-
-```bash
-# 创建用户 (通过 Service B 调用 Service A)
-curl -X POST http://localhost:8082/api/users \
-  -H "Content-Type: application/json" \
-  -d '{"name":"赵六","email":"zhaoliu@example.com","age":26}'
-
-# 获取所有用户
-curl http://localhost:8082/api/users
-
-# 获取指定用户
-curl http://localhost:8082/api/users/1
-
-# 更新用户
-curl -X PUT http://localhost:8082/api/users/1 \
-  -H "Content-Type: application/json" \
-  -d '{"name":"张三更新","email":"zhangsan_new@example.com","age":26}'
-
-# 删除用户
-curl -X DELETE http://localhost:8082/api/users/1
-
-# 获取用户统计
-curl http://localhost:8082/api/users/summary
-```
-
 ## Nacos 服务列表
 
 启动成功后，在 Nacos 控制台可以看到两个服务已注册：
@@ -141,3 +115,29 @@ Service B 通过 `@FeignClient(name = "service-a")` 声明式调用 Service A：
 - 自动从 Nacos 获取 `service-a` 的实例列表
 - 自动进行负载均衡（Spring Cloud LoadBalancer）
 - 支持自定义超时、日志级别等配置
+
+## RocketMQ相关
+
+```bash
+cd <yourpath>/rocketmq-all-4.9.8-bin-release/bin
+nohup sh mqnamesrv > ~/logs/mqnamesrv.log 2>&1 &
+nohup sh mqbroker -c ~/Env/rocketmq-all-4.9.8-bin-release/conf/broker.conf -n localhost:9876 > ~/logs/mqbroker.log 2>&1 &
+
+#创建topic
+./mqadmin updateTopic \
+    -n localhost:9876 \
+    -b localhost:10911 \
+    -t service-a-topic
+    
+    
+  # 灌 2000 条，让 service-b 消费不过来形成堆积
+  mvn exec:java -Dexec.mainClass="com.example.serviceb.mq.BatchProducer" -Dexec.args="service-a-topic 2000 localhost:9876" -q 2>&1 | grep -E "已发送|完成" | tail -15
+  
+  #查看消费进度
+  ./mqadmin consumerProgress -n localhost:9876 -g service-b-pull-consumer
+  
+  # 把topic 队列数扩到10
+  sh ~/Env/rocketmq-all-4.9.8-bin-release/bin/mqadmin updateTopic \
+    -n localhost:9876 -b localhost:10911 \
+    -t service-a-topic -r 10 -w 10
+```

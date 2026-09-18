@@ -67,6 +67,13 @@
             <artifactId>spring-cloud-starter-bootstrap</artifactId>
         </dependency>
 
+        <!-- RocketMQ 客户端 4.9.8(pull 模式,与本地 broker 4.9.8 对齐) -->
+        <dependency>
+            <groupId>org.apache.rocketmq</groupId>
+            <artifactId>rocketmq-client</artifactId>
+            <version>4.9.8</version>
+        </dependency>
+
         <!-- Apache HttpClient -->
         <dependency>
             <groupId>org.apache.httpcomponents.client5</groupId>
@@ -159,6 +166,15 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+
+            <!-- exec-maven-plugin:用于运行 BatchProducer 等独立 main 类
+                 用法: mvn -pl service-b exec:java -Dexec.mainClass="com.example.serviceb.mq.BatchProducer"
+                      mvn -pl service-b exec:java -Dexec.mainClass="..." -Dexec.args="topic count namesrv" -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.1.0</version>
             </plugin>
         </plugins>
     </build>
