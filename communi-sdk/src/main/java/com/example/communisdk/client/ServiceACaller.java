@@ -54,16 +54,4 @@ public class ServiceACaller {
         return bulkheadExecutor.submit(RESOURCE, feignCall);
     }
 
-    /**
-     * 在线程池隔离保护下执行一次无返回值的 service-a 调用。
-     *
-     * @param feignCall 封装了 Feign 调用的 Runnable(启用隔离时在隔离线程中执行)
-     * @return 完成后无值的 CompletableFuture;池+队列满时同步抛 BulkheadFullException
-     */
-    public CompletableFuture<Void> executeVoid(Runnable feignCall) {
-        return bulkheadExecutor.submit(RESOURCE, () -> {
-            feignCall.run();
-            return (Void) null;
-        });
-    }
 }

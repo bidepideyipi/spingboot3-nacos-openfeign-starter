@@ -57,9 +57,4 @@ public class AggregationController {
         return userAggregationService.updateUser(id, user);
     }
 
-    @DeleteMapping("/users/{id}")
-    public void deleteUser(@PathVariable Long id) {
-        log.info("删除用户: id={}", id);
-        userAggregationService.deleteUser(id);
-    }
 }

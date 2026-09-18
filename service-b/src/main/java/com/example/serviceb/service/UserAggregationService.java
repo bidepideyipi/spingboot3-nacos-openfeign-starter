@@ -59,11 +59,6 @@ public class UserAggregationService {
         return call(() -> serviceAClient.updateUser(id, user));
     }
 
-    public void deleteUser(Long id) {
-        log.info("通过 Service A 删除用户: id={}", id);
-        callVoid(() -> serviceAClient.deleteUser(id));
-    }
-
     public String getUserSummary() {
         List<UserDto> users = call(() -> serviceAClient.getAllUsers());
         return String.format("Service A 当前共有 %d 个用户", users.size());
@@ -79,11 +74,4 @@ public class UserAggregationService {
         }
     }
 
-    private void callVoid(Runnable feignCall) {
-        try {
-            serviceACaller.executeVoid(feignCall).get(CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-        } catch (Exception e) {
-            throw new RuntimeException("调用 service-a 失败: " + e.getMessage(), e);
-        }
-    }
 }
