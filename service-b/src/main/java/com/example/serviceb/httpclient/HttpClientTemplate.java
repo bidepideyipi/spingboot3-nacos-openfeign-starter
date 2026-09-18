@@ -4,9 +4,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.resilience4j.bulkhead.BulkheadFullException;
 import io.github.resilience4j.bulkhead.ThreadPoolBulkhead;
 import io.github.resilience4j.bulkhead.ThreadPoolBulkheadRegistry;
-import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
-import io.github.resilience4j.circuitbreaker.CircuitBreaker;
-import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.http.client.methods.CloseableHttpResponse;
@@ -16,6 +13,7 @@ import org.apache.http.client.methods.HttpRequestBase;
 import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.util.EntityUtils;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -27,16 +25,16 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 /**
- * HTTP 请求模板，集成 Resilience4j 线程池隔离 + 熔断。
+ * HTTP 请求模板，仅集成 Resilience4j 线程池隔离 (ThreadPoolBulkhead)。
  *
  * <p>下游调用在独立的 {@link ThreadPoolBulkhead} 线程池中执行:
  * <ul>
  *   <li>下游变慢时,只有隔离池中的线程在等待,本服务请求线程不会堆积;</li>
- *   <li>隔离池满(queue-capacity=0)时立即抛 {@link BulkheadFullException},不排队;</li>
- *   <li>熔断器通过慢调用比例感知下游压力,达到阈值后停止发送流量。</li>
+ *   <li>线程池满且队列满时立即抛 {@link BulkheadFullException},不阻塞调用线程;</li>
+ *   <li>本项目不使用熔断器,仅靠线程池隔离感知下游压力。</li>
  * </ul>
- * 每个 resourceName 对应 application.yml 中 resilience4j.circuitbreaker.instances
- * 与 thread-pool-bulkhead.instances 下同名的实例。
+ * 每个 resourceName 对应 application.yml 中 resilience4j.thread-pool-bulkhead.instances
+ * 下同名的实例。
  */
 @Slf4j
 @Component
@@ -48,14 +46,24 @@ public class HttpClientTemplate {
 
     private final CloseableHttpClient httpClient;
     private final ObjectMapper objectMapper;
-    private final CircuitBreakerRegistry circuitBreakerRegistry;
     private final ThreadPoolBulkheadRegistry threadPoolBulkheadRegistry;
+
+    /**
+     * 线程池隔离开关。
+     * <ul>
+     *   <li>{@code true}(默认): 走隔离线程池,池+队列满时立即拒绝(BulkheadFullException)。</li>
+     *   <li>{@code false}: 调用线程直通,在当前线程同步执行下游调用,不隔离、不拒绝。</li>
+     * </ul>
+     * 由 {@code resilience4j.thread-pool-bulkhead.enabled} 控制。
+     */
+    @Value("${resilience4j.thread-pool-bulkhead.enabled:true}")
+    private boolean bulkheadEnabled;
 
     /**
      * GET请求
      *
      * @param url          请求URL
-     * @param resourceName Resilience4j 资源名称(对应 circuitbreaker/thread-pool-bulkhead 实例名)
+     * @param resourceName Resilience4j 资源名称(对应 thread-pool-bulkhead 实例名)
      * @param responseType 返回类型
      * @return 响应结果
      */
@@ -108,45 +116,38 @@ public class HttpClientTemplate {
     }
 
     /**
-     * 执行请求(线程池隔离 + 熔断)
+     * 执行请求(线程池隔离)
      *
-     * <p>调用链: 调用线程 -> 提交到隔离线程池 -> 熔断器统计慢调用/失败 -> 实际HTTP请求
-     * <p>隔离池满时 {@link BulkheadFullException} 立即返回限流响应;
-     *    熔断打开时 {@link CallNotPermittedException} 返回降级响应。
+     * <p>调用链: 调用线程 -> 提交到隔离线程池 -> 实际HTTP请求
+     * <p>隔离池满且队列满时 {@link BulkheadFullException} 立即返回限流响应。
      */
     private <T> HttpResponse<T> execute(HttpRequestBase request, String resourceName, Class<T> responseType) {
         long startTime = System.currentTimeMillis();
-        CircuitBreaker circuitBreaker = circuitBreakerRegistry.circuitBreaker(resourceName);
+
+        // 隔离开关关闭:调用线程直通,不走隔离池
+        if (!bulkheadEnabled) {
+            try {
+                return doRequest(request, responseType, startTime);
+            } catch (RuntimeException e) {
+                log.error("请求执行异常(线程池隔离已关闭): url={}", request.getURI(), e);
+                return HttpResponse.error("请求异常: " + e.getMessage());
+            }
+        }
+
         ThreadPoolBulkhead bulkhead = threadPoolBulkheadRegistry.bulkhead(resourceName);
 
         try {
-            // 1. 熔断器先在调用线程上获取许可:OPEN 时直接抛 CallNotPermittedException,不占用隔离池线程
-            circuitBreaker.acquirePermission();
+            // 实际调用在隔离线程池中执行(executeSupplier 池+队列满时同步抛 BulkheadFullException)
+            CompletableFuture<HttpResponse<T>> future = bulkhead.executeSupplier(() ->
+                    doRequest(request, responseType, startTime)
+            ).toCompletableFuture();
 
-            // 2. 实际调用在隔离线程池中执行(executeSupplier 池满时同步抛 BulkheadFullException)
-            //    熔断器记录成功/失败与耗时(用于慢调用统计)
-            long callStart = System.nanoTime();
-            CompletableFuture<HttpResponse<T>> future = bulkhead.executeSupplier(() -> {
-                try {
-                    HttpResponse<T> result = doRequest(request, responseType, startTime);
-                    circuitBreaker.onSuccess(System.nanoTime() - callStart, TimeUnit.NANOSECONDS);
-                    return result;
-                } catch (RuntimeException e) {
-                    circuitBreaker.onError(System.nanoTime() - callStart, TimeUnit.NANOSECONDS, e);
-                    throw e;
-                }
-            }).toCompletableFuture();
-
-            // 3. 调用线程等待结果(有超时兜底,实际等待时长受 HTTP socket-timeout 约束)
+            // 调用线程等待结果(有超时兜底,实际等待时长受 HTTP socket-timeout 约束)
             return future.get(CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         } catch (BulkheadFullException e) {
             long rt = System.currentTimeMillis() - startTime;
             log.warn("隔离线程池已满,请求被拒绝: resource={}, url={}, rt={}ms", resourceName, request.getURI(), rt);
             return HttpResponse.blocked("下游压力过大,请求被拒绝: " + e.getMessage());
-        } catch (CallNotPermittedException e) {
-            long rt = System.currentTimeMillis() - startTime;
-            log.warn("请求被熔断: resource={}, url={}, rt={}ms", resourceName, request.getURI(), rt);
-            return HttpResponse.degraded("服务降级: " + e.getMessage());
         } catch (TimeoutException e) {
             long rt = System.currentTimeMillis() - startTime;
             log.warn("请求等待超时: url={}, rt={}ms", request.getURI(), rt);
@@ -165,7 +166,6 @@ public class HttpClientTemplate {
 
     /**
      * 实际执行 HTTP 请求并解析响应(在隔离线程池中运行)。
-     * 异常向上抛出,由熔断器记录为失败。
      */
     private <T> HttpResponse<T> doRequest(HttpRequestBase request, Class<T> responseType, long startTime) {
         try (CloseableHttpResponse response = httpClient.execute(request)) {
@@ -183,7 +183,6 @@ public class HttpClientTemplate {
                 }
                 return HttpResponse.success(statusCode, data);
             } else {
-                // 非 2xx 视为失败,抛出以触发熔断统计
                 throw new IOException("HTTP请求失败: statusCode=" + statusCode + ", body=" + responseBody);
             }
         } catch (IOException e) {

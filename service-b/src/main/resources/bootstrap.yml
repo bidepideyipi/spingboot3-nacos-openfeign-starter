@@ -1,9 +1,6 @@
 spring:
   application:
     name: service-b
-  config:
-    import:
-      - optional:nacos:service-b.yml
   cloud:
     nacos:
       server-addr: 127.0.0.1:8848
@@ -11,8 +8,3 @@ spring:
         enabled: true
         namespace: public
         group: DEFAULT_GROUP
-      config:
-        enabled: true
-        namespace: public
-        group: DEFAULT_GROUP
-        file-extension: yml

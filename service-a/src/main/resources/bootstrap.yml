@@ -1,21 +1,8 @@
 spring:
   application:
     name: service-a
-  config:
-    import:
-      - optional:nacos:service-a.yml
   cloud:
     nacos:
       server-addr: 127.0.0.1:8848
       discovery:
-        # enabled: true
-        # namespace: public
-        # group: DEFAULT_GROUP
         register-enabled: false   # 关闭自动注册，改由 StartedEventListener 手动触发
-        # register-enabled: true
-        # instance-enabled: false
-      config:
-        enabled: true
-        namespace: public
-        group: DEFAULT_GROUP
-        file-extension: yml

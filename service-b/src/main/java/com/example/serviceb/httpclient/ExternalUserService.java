@@ -10,9 +10,9 @@ import java.util.*;
 /**
  * 外部用户服务调用。
  *
- * <p>熔断与限流规则统一由 application.yml 中 resilience4j.* 配置，无需在代码中
- * 手动加载规则。资源名称(externalUserApi / slowApi / resetCounter)对应 yml 中
- * 的 circuitbreaker / ratelimiter 实例。
+ * <p>线程池隔离规则统一由 application.yml 中 resilience4j.thread-pool-bulkhead.* 配置，
+ * 无需在代码中手动加载规则。资源名称(externalUserApi / slowApi / resetCounter)对应 yml 中
+ * 的 thread-pool-bulkhead 实例。
  */
 @Slf4j
 @Service

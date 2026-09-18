@@ -23,9 +23,6 @@ management:
   endpoint:
     health:
       show-details: always
-  health:
-    circuitbreakers:
-      enabled: true
 
 feign:
   client:
@@ -36,79 +33,49 @@ feign:
       service-a:
         connectTimeout: 3000
         readTimeout: 10000
-  circuitbreaker:
-    enabled: true
 
-# Resilience4j 配置 - 线程池隔离感知下游压力
-# 思路: 下游变慢/过载时,调用线程会在隔离线程池中等待响应;
-#       当隔离池满时新请求被立即拒绝(BulkheadFullException),避免线程堆积拖垮本服务。
+# Resilience4j 配置 - 仅使用线程池隔离舱壁 (ThreadPoolBulkhead)
+# 思路: 下游变慢/过载时,调用在独立的有界线程池中执行;
+#       当线程池 + 队列都满时,新请求立即被拒绝 (BulkheadFullException),
+#       避免调用线程堆积拖垮本服务。
+# 注意: 本项目不使用熔断器 (CircuitBreaker),只靠线程池隔离感知下游压力。
 # 配置三层结构: configs(模板) -> instances(实例,引用模板) -> 代码按实例名使用
 resilience4j:
-
-  # ===================== 熔断器 (CircuitBreaker) =====================
-  # 通过"慢调用比例"感知下游响应变慢(调用线程等待时间过长)
-  # 状态机: CLOSED(正常) -> OPEN(熔断) -> HALF_OPEN(试探) -> CLOSED
-  circuitbreaker:
-    configs:
-      default:
-        # 是否向 Actuator 健康检查注册熔断器状态
-        register-health-indicator: true
-        # 滑动窗口类型: TIME_BASED 基于时间(更能反映"当前"压力,与流量大小无关)
-        sliding-window-type: TIME_BASED
-        # 滑动窗口大小: TIME_BASED 下为"秒数"(Integer,非 Duration),30 秒内的调用用于计算
-        sliding-window-size: 30
-        # 触发熔断计算所需的最小调用次数(未达此值不熔断)
-        minimum-number-of-calls: 10
-        # 失败率阈值(百分比),窗口内失败率达到 50% 触发熔断
-        failure-rate-threshold: 50
-        # 慢调用比例阈值(百分比),窗口内慢调用比例达到 50% 触发熔断
-        slow-call-rate-threshold: 50
-        # 慢调用判定时长,超过 3s 视为慢调用(即线程等待下游超过 3s)
-        slow-call-duration-threshold: 3s
-        # 熔断打开后保持 OPEN 的时长,过后自动进入 HALF_OPEN
-        wait-duration-in-open-state: 10s
-        # HALF_OPEN 状态放行的试探请求数
-        permitted-number-of-calls-in-half-open-state: 3
-    instances:
-      # Feign 调用 service-a 使用的熔断器
-      service-a:
-        base-config: default
-      # HttpClientTemplate 调用外部用户 API 使用的熔断器
-      externalUserApi:
-        base-config: default
-      # 慢调用演示接口使用的熔断器
-      slowApi:
-        base-config: default
-      # 重置计数器接口使用的熔断器
-      resetCounter:
-        base-config: default
 
   # ===================== 线程池隔离舱壁 (ThreadPoolBulkhead) =====================
   # 把对下游的调用放到一个有界的独立线程池中执行:
   # - 下游变慢时,只有这个隔离池里的线程在等待,不影响本服务其它请求线程;
-  # - 池满(queue-capacity=0)时新请求立即抛 BulkheadFullException,不排队、不阻塞调用线程。
+  # - 线程池满且队列满时,新请求立即抛 BulkheadFullException,不阻塞调用线程。
   thread-pool-bulkhead:
+    # ★ 线程池隔离开关(自定义属性,Resilience4j 不识别,由 HttpClientTemplate / ServiceACaller 读取)
+    #   true  (默认): 启用隔离,池+队列满时立即拒绝
+    #   false        : 关闭隔离,调用线程直通(在当前线程同步执行下游调用,不隔离、不拒绝)
+    enabled: true
     configs:
       default:
-        # 隔离线程池最大线程数 = 同时等待下游的最大线程数
-        max-thread-pool-size: 15
+        # 隔离线程池最大线程数 = 同时执行下游调用的最大线程数
+        max-thread-pool-size: 10
         # 核心线程数(常驻)
         core-thread-pool-size: 10
-        # 等待队列容量: 0 表示不排队,池满立即拒绝(关键!避免请求在队列里阻塞等待)
-        queue-capacity: 0
-        # 空闲线程存活时长
+        # 等待队列容量: 线程池满后,多余请求在此排队;队列也满时才立即拒绝
+        queue-capacity: 20
+        # 空闲线程存活时长(仅对超出 core 的线程生效)
         keep-alive-duration: 1m
-    instances:
-      service-a:
-        base-config: default
-      externalUserApi:
-        base-config: default
-      slowApi:
-        base-config: default
-      resetCounter:
-        base-config: default
+    #instances:
+      # SDK 的 ServiceACaller (Feign 调用 service-a) 使用的隔离舱
+    #  service-a:
+    #    base-config: default
+      # HttpClientTemplate 调用外部用户 API 使用的隔离舱
+    #  externalUserApi:
+    #    base-config: default
+      # 慢调用演示接口使用的隔离舱
+    #  slowApi:
+    #    base-config: default
+      # 重置计数器接口使用的隔离舱
+    #  resetCounter:
+    #    base-config: default
 
 logging:
   level:
-    com.example.serviceb.httpclient: DEBUG
+    #com.example.serviceb.httpclient: DEBUG
     io.github.resilience4j: DEBUG

@@ -47,11 +47,6 @@
         </dependency>
 
         <dependency>
-            <groupId>com.alibaba.cloud</groupId>
-            <artifactId>spring-cloud-starter-alibaba-nacos-config</artifactId>
-        </dependency>
-
-        <dependency>
             <groupId>org.springframework.cloud</groupId>
             <artifactId>spring-cloud-starter-openfeign</artifactId>
         </dependency>
@@ -78,10 +73,11 @@
             <artifactId>httpclient5</artifactId>
         </dependency>
 
-        <!-- Resilience4j Circuit Breaker (Spring Cloud integration) -->
+        <!-- communi-sdk: 封装 Feign HTTP 客户端 + 熔断/线程池隔离(注解方式) -->
         <dependency>
-            <groupId>org.springframework.cloud</groupId>
-            <artifactId>spring-cloud-starter-circuitbreaker-resilience4j</artifactId>
+            <groupId>com.example</groupId>
+            <artifactId>communi-sdk</artifactId>
+            <version>1.0.0</version>
         </dependency>
 
         <!-- Resilience4j core modules
@@ -145,6 +141,21 @@
 
     <build>
         <plugins>
+            <!-- 显式声明 Lombok 注解处理器,避免依赖 classpath 自动发现
+                 (JDK 17.0.12 + Lombok 1.18.30 在某些环境下自动发现失效) -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                            <version>1.18.30</version>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
