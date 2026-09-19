@@ -2,6 +2,7 @@ package com.example.serviceb.mq;
 
 import com.example.communisdk.client.ServiceACaller;
 import com.example.serviceb.client.ServiceAClient;
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.rocketmq.client.consumer.DefaultLitePullConsumer;
@@ -68,7 +69,7 @@ public class ServiceAPullConsumer {
     private String group;
     @Value("${rocketmq.consumer.topic}")
     private String topic;
-    @Value("${rocketmq.consumer.threads:4}")
+    @Value("${rocketmq.consumer.threads:16}")
     private int threads;
     @Value("${rocketmq.consumer.pull-timeout-ms:3000}")
     private long pullTimeoutMs;
@@ -127,11 +128,18 @@ public class ServiceAPullConsumer {
         while (running.get() && !Thread.currentThread().isInterrupted()) {
             MessageExt msg = null;
             try {
-                // ★ 背压预判:poll 前先看隔离舱还有没有空位。
+                // ★ 背压预判:poll 前先看熔断器 + 隔离舱是否还有空位。
+                //   熔断打开 → 不 poll(避免拉了立即被 CallNotPermittedException 拒绝再 seek 重投的无效往返),
+                //   睡一小段等熔断半开 → 背压从熔断器直接传到消费者。
+                if (!serviceACaller.isCallPermitted()) {
+                    log.info("[实例{}] 熔断打开,跳过 poll 等待半开", idx);
+                    sleepQuietly(capacityCheckIntervalMs);
+                    continue;
+                }
                 //   没空位 → 不 poll(避免拉了立即被 BulkheadFullException 拒绝再 seek 重投的无效往返),
                 //   睡一小段(仅防 busy-spin 空转查指标,与下游保护无关)再查 → 背压从隔离舱直接传到消费者。
                 int rc = serviceACaller.getRemainingCapacity();
-                if (rc <= 10) {
+                if (rc <= 0) {
                     sleepQuietly(capacityCheckIntervalMs);
                     continue;
                 }
@@ -149,7 +157,7 @@ public class ServiceAPullConsumer {
                 // 下游慢 → .get() 阻塞变长 → 该实例不再 poll;N 个实例都阻塞 → 背压传回 broker
                 // 不加额外超时:底层 HttpClient 已有连接/读取超时兜底,这里无限等让背压自然形成
                 String result = serviceACaller
-                        .execute(() -> serviceAClient.getSlowFixed(150))//模拟下游处理时间
+                        .execute(() -> serviceAClient.getSlowFixed(500))//模拟下游处理时间
                         .get();
 
                 // 成功 → ack 本条(提交偏移)
@@ -157,6 +165,15 @@ public class ServiceAPullConsumer {
                 log.info("[实例{}] 消息处理成功并 ack: msgId={}, queueId={}, offset={}, response={}",
                         idx, msg.getMsgId(), msg.getQueueId(), msg.getQueueOffset(), result);
 
+            } catch (CallNotPermittedException e) {
+                // 熔断打开: 下游整体不可用,seek 重投无意义(重投也会被拒),
+                // 回退偏移下次重拉 + 较长退避等熔断半开
+                if (msg != null) {
+                    log.warn("[实例{}] 熔断打开,回退等待半开: msgId={}, queueId={}, offset={}",
+                            idx, msg.getMsgId(), msg.getQueueId(), msg.getQueueOffset());
+                    seekBack(c, msg, idx);
+                }
+                sleepQuietly(capacityCheckIntervalMs);
             } catch (Exception e) {
                 if (msg != null) {
                     seekBack(c, msg, idx);

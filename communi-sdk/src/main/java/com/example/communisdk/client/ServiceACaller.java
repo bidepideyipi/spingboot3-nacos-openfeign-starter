@@ -66,4 +66,17 @@ public class ServiceACaller {
         return bulkheadExecutor.getRemainingCapacity(RESOURCE);
     }
 
+    /**
+     * 探测 service-a 熔断器是否放行调用(不计数,仅探测)。
+     *
+     * <p>供消费方做背压预判:返回 false 时熔断打开,提交必定抛
+     * {@link io.github.resilience4j.circuitbreaker.CallNotPermittedException},
+     * 调用方应跳过本次提交(如 MQ 消费者据此跳过 poll,等熔断半开)。
+     *
+     * @return true=熔断关闭/半开,可调用;false=熔断打开;熔断关闭时恒为 true
+     */
+    public boolean isCallPermitted() {
+        return bulkheadExecutor.isCallPermitted(RESOURCE);
+    }
+
 }

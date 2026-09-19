@@ -11,7 +11,7 @@ rocketmq:
   consumer:
     group: service-b-pull-consumer
     topic: service-a-topic
-    threads: 10              # 消费线程数(= 消费者实例数)。有效并发 = min(threads, topic 队列数,默认4)
+    threads: 16              # 消费线程数(= 消费者实例数)。有效并发 = min(threads, topic 队列数)
     pull-timeout-ms: 3000      # 一次 poll 最长阻塞等待时间
     capacity-check-interval-ms: 500  # 容量预判为0时的重查间隔(防 busy-spin)
 
@@ -44,11 +44,14 @@ feign:
         connectTimeout: 3000
         readTimeout: 10000
 
-# Resilience4j 配置 - 仅使用线程池隔离舱壁 (ThreadPoolBulkhead)
-# 思路: 下游变慢/过载时,调用在独立的有界线程池中执行;
-#       当线程池 + 队列都满时,新请求立即被拒绝 (BulkheadFullException),
-#       避免调用线程堆积拖垮本服务。
-# 注意: 本项目不使用熔断器 (CircuitBreaker),只靠线程池隔离感知下游压力。
+# Resilience4j 配置 - 线程池隔离舱壁 (ThreadPoolBulkhead) + 熔断器 (CircuitBreaker)
+# 思路:
+#   1. ThreadPoolBulkhead: 下游变慢/过载时,调用在独立的有界线程池中执行;
+#      线程池 + 队列都满时,新请求立即被拒绝 (BulkheadFullException),避免调用线程堆积拖垮本服务。
+#   2. CircuitBreaker: 基于"时间窗口"的失败率熔断。最近 60s 内失败率 ≥ 50% → 熔断打开 30s,
+#      期间请求同步短路 (CallNotPermittedException),不进隔离舱、不占线程,保护本服务并发资源。
+#   3. 装饰顺序: CircuitBreaker(外) → ThreadPoolBulkhead(内)。
+#      熔断打开时直接短路,池线程不被失败请求占用;熔断关闭/半开时才提交到池。
 # 配置三层结构: configs(模板) -> instances(实例,引用模板) -> 代码按实例名使用
 resilience4j:
 
@@ -76,6 +79,52 @@ resilience4j:
       service-a:
         base-config: default
       # HttpClient 直连 service-a(绕过 Feign)使用的隔离舱 —— 与 service-a 独立,互不影响
+      service-a-http:
+        base-config: default
+
+  # ===================== 熔断器 (CircuitBreaker) =====================
+  # 时间窗口失败率熔断: 最近 60s 内调用失败率 ≥ 50% → 熔断打开 30s
+  circuitbreaker:
+    # ★ 熔断器开关(自定义属性,Resilience4j 不识别,由 BulkheadExecutor 读取)
+    #   true  (默认): 启用熔断,熔断打开时同步抛 CallNotPermittedException
+    #   false        : 关闭熔断,只走隔离舱
+    enabled: true
+    configs:
+      default:
+        # —— 滑动窗口(时间维度) ——
+        # TIME_BASED: 按时间窗口统计;COUNT_BASED: 按调用次数窗口统计
+        sliding-window-type: TIME_BASED
+        # 窗口大小: TIME_BASED 下为秒数,这里取最近 60 秒
+        sliding-window-size: 60
+        # 窗口内至少 N 次调用才计算失败率,避免冷启动误判(2 个调用 1 个失败就熔断)
+        minimum-number-of-calls: 10
+        # —— 失败判定 ——
+        # 失败率门槛(百分比): 窗口内失败率 ≥ 50% 触发熔断
+        failure-rate-threshold: 50
+        # 慢调用率门槛(百分比): 窗口内慢调用占比 ≥ 60% 也触发熔断
+        slow-call-rate-threshold: 60
+        # 慢调用阈值: 超过 3s 视为慢调用
+        slow-call-duration-threshold: 3s
+        # —— 状态机 ——
+        # 熔断打开后等待 30s 进入半开,放少量试探调用
+        wait-duration-in-open-state: 30s
+        # 半开状态允许的试探调用数
+        permitted-number-of-calls-in-half-open-state: 3
+        # false: 不自动从 open 转 half-open,需等 wait-duration 到期(默认行为,更安全)
+        # true:  后台定时器自动转 half-open(无需调用触发)
+        automatic-transition-from-open-to-half-open-enabled: false
+        # —— 哪些异常算失败 / 哪些忽略 ——
+        # record-exceptions: 命中则记为失败(影响失败率)
+        # ignore-exceptions: 命中则不计失败(业务异常,不该熔断下游)
+        record-exceptions:
+          - java.io.IOException
+          - java.net.SocketTimeoutException
+          - java.util.concurrent.TimeoutException
+          - feign.FeignException
+    instances:
+      # 与隔离舱同名,代码里按同名 resource 取 CB + Bulkhead
+      service-a:
+        base-config: default
       service-a-http:
         base-config: default
 
