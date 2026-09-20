@@ -157,7 +157,7 @@ public class ServiceAPullConsumer {
                 // 下游慢 → .get() 阻塞变长 → 该实例不再 poll;N 个实例都阻塞 → 背压传回 broker
                 // 不加额外超时:底层 HttpClient 已有连接/读取超时兜底,这里无限等让背压自然形成
                 String result = serviceACaller
-                        .execute(() -> serviceAClient.getSlowFixed(500))//模拟下游处理时间
+                        .execute(() -> serviceAClient.getSlowFixed(500))//Simulate downstream processing time
                         .get();
 
                 // 成功 → ack 本条(提交偏移)

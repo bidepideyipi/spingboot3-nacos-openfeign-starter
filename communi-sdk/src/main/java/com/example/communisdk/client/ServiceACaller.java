@@ -10,6 +10,14 @@ import java.util.function.Supplier;
 /**
  * service-a 的线程池隔离调用器(抽象封装)。
  *
+ * “ServiceACaller” is an isolated executor decoupled from Feign: it is unaware of Feign and accepts only Suppliers;
+ *  the Feign interface is defined by the consumer and encapsulated as a Supplier before being passed in.
+ *  This way, when downstream interfaces are added, removed, or modified, only the consumer’s Feign interface
+ *  needs to be updated—the SDK never needs to be changed.
+ *
+ * ServiceACaller 是与 Feign 解耦的隔离执行器:它不知道 Feign,只接受 Supplier;Feign 接口由消费方定义并包成 Supplier
+ *   传进来。这样下游接口增删改时只改消费方的 Feign 接口,SDK 永远不用动。
+ *
  * <p>设计目标:
  * <ul>
  *   <li><b>注解只写一次</b>: 对 service-a 的所有调用统一走名为 {@code "service-a"} 的隔离舱,
