@@ -5,8 +5,19 @@ spring:
   application:
     name: service-a
 
+# Actuator / Prometheus 配置
+# - 独立管理端口: actuator 端点(含 /actuator/prometheus)在此端口暴露,与业务端口隔离
+# - 暴露 prometheus 端点供 Prometheus 抓取
+# - 所有指标自动打上 application 标签,便于在 Grafana 中按服务名区分
 management:
   endpoints:
     web:
       exposure:
         include: '*'
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+  endpoint:
+    health:
+      show-details: always

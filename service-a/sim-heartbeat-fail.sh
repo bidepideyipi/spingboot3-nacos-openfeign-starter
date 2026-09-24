@@ -35,7 +35,7 @@ sudo pfctl -ef "$PF_RULES" 2>&1 | tail -2
 
 echo
 echo "=== [2] 轮询实例状态 (每 3s)，预期: ~15s healthy=false，~30s 实例被剔除 ==="
-for i in $(seq 1 13); do
+for i in $(seq 1 32); do
   printf "[%2ds] " $((i*3))
   state
   sleep 3

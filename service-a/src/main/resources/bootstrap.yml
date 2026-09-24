@@ -5,4 +5,5 @@ spring:
     nacos:
       server-addr: 127.0.0.1:8848
       discovery:
-        register-enabled: false   # 关闭自动注册，改由 StartedEventListener 手动触发
+        register-enabled: true     # 开启自动注册（WebServerInitializedEvent 时由 NacosAutoServiceRegistration 触发）
+        instance-enabled: false    # 注册时实例默认为 DOWN(不接流量)，由 StartedEventListener 在初始化完成后翻为 UP
